@@ -4,8 +4,9 @@ services:
     name: recipe-calculator-api
     env: python
     buildCommand: |
-      # Install system dependencies
-      apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-dan
+      # Install system dependencies including Tesseract and Danish language pack
+      apt-get update && \
+      apt-get install -y tesseract-ocr tesseract-ocr-dan libtesseract-dev
       pip install -r server/requirements.txt
     startCommand: cd server && uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
@@ -13,6 +14,8 @@ services:
         value: 3.9.0
       - key: PYTHONPATH
         value: server
+      - key: TESSDATA_PREFIX
+        value: /usr/share/tesseract-ocr/4.00/tessdata
       
   # Frontend static site
   - type: web
@@ -26,5 +29,4 @@ services:
         destination: /index.html
     envVars:
       - key: REACT_APP_API_URL
-        value: https://recipe-calculator-api.onrender.com  # Make sure this matches your API service URL
-        
+        value: https://recipe-calculator-api.onrender.com
