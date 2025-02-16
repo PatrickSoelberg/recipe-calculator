@@ -7,30 +7,20 @@ import pytesseract
 import io
 import re
 import json
+import os
 import requests
+import logging
+import subprocess
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 import cv2
 import numpy as np
 
-# Set Tesseract command path explicitly
-pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app = FastAPI()
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://recipe-calculator-web.onrender.com",  # Add your frontend URL
-        "https://recipe-calculator-api.onrender.com"   # Add your backend URL
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+# Pydantic models
 class Ingredient(BaseModel):
     name: str
     amount: str
@@ -39,7 +29,7 @@ class Ingredient(BaseModel):
 class RecipeResponse(BaseModel):
     ingredients: List[Ingredient]
     success: bool
-    error: str = None
+    error: Optional[str] = None
 
 # Danish-specific corrections and mappings
 DANISH_CORRECTIONS = {
@@ -75,6 +65,35 @@ DANISH_UNITS = {
     'dåse': 'dåse',
     # Add more units as needed
 }
+
+# Find Tesseract executable by checking common locations
+tesseract_cmd = 'tesseract'  # Default to just the command name
+for path in ['/usr/bin/tesseract', '/usr/local/bin/tesseract', 'tesseract']:
+    try:
+        subprocess.run([path, '--version'], capture_output=True, check=True)
+        tesseract_cmd = path
+        break
+    except (subprocess.SubprocessError, FileNotFoundError):
+        continue
+
+# Configure pytesseract
+pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
+# Create FastAPI app
+app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://recipe-calculator-web.onrender.com",
+        "https://recipe-calculator-api.onrender.com"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def preprocess_image(image: Image.Image) -> Image.Image:
     """
