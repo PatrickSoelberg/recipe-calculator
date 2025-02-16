@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Tesseract data environment variable
-ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/4.00/tessdata
+ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/tessdata/
 
 # Set working directory
 WORKDIR /app
@@ -19,8 +19,9 @@ RUN pip install -r requirements.txt
 # Copy the rest of the application
 COPY server/ .
 
-# Verify Tesseract and language data
-RUN tesseract --list-langs
+# Verify Tesseract installation and language data
+RUN tesseract --list-langs && \
+    ls -la $TESSDATA_PREFIX
 
 # Command to run the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]
