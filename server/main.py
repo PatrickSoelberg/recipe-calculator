@@ -20,8 +20,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://*.onrender.com",
-        "https://your-custom-domain.com"  # Add your domain when you have it
+        "https://recipe-calculator-web.onrender.com",  # Add your frontend URL
+        "https://recipe-calculator-api.onrender.com"   # Add your backend URL
     ],
     allow_credentials=True,
     allow_methods=["*"],

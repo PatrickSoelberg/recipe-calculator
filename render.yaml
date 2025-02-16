@@ -3,16 +3,16 @@ services:
   - type: web
     name: recipe-calculator-api
     env: python
-    buildCommand: pip install -r server/requirements.txt
+    buildCommand: |
+      # Install system dependencies
+      apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-dan
+      pip install -r server/requirements.txt
     startCommand: cd server && uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.0
       - key: PYTHONPATH
         value: server
-    buildFilter:
-      paths:
-      - server/**
       
   # Frontend static site
   - type: web
@@ -26,4 +26,5 @@ services:
         destination: /index.html
     envVars:
       - key: REACT_APP_API_URL
-        value: https://recipe-calculator-api.onrender.com # Will be updated after API deployment
+        value: https://recipe-calculator-api.onrender.com  # Make sure this matches your API service URL
+        
