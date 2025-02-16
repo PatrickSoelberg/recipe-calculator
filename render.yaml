@@ -4,9 +4,10 @@ services:
     name: recipe-calculator-api
     env: python
     buildCommand: |
-      # Install system dependencies including Tesseract and Danish language pack
+      # Install system dependencies
       apt-get update && \
-      apt-get install -y tesseract-ocr tesseract-ocr-dan libtesseract-dev
+      apt-get install -y tesseract-ocr tesseract-ocr-dan libtesseract-dev && \
+      ln -s /usr/bin/tesseract /usr/local/bin/tesseract
       pip install -r server/requirements.txt
     startCommand: cd server && uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:

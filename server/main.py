@@ -13,6 +13,9 @@ from urllib.parse import urlparse
 import cv2
 import numpy as np
 
+# Set Tesseract command path explicitly
+pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+
 app = FastAPI()
 
 # Add CORS middleware
