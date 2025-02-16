@@ -4,16 +4,16 @@ services:
     name: recipe-calculator-api
     env: python
     buildCommand: |
-      apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-dan
+      apt-get update
+      apt-get install -y tesseract-ocr
+      apt-get install -y tesseract-ocr-dan
       pip install -r server/requirements.txt
     startCommand: cd server && uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHONPATH
         value: server
-      - key: TESSDATA_PREFIX
-        value: /usr/share/tesseract-ocr/tessdata
       
-  # Frontend static site
+  # Frontend static site configuration remains the same
   - type: web
     name: recipe-calculator-web
     env: static
