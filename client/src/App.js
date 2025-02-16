@@ -1,6 +1,8 @@
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 import React, { useState } from 'react';
 import { Upload, Link, Users } from 'lucide-react';
+
+// Configuration for API
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 // List of common preparation terms to remove
 const preparationTerms = [
@@ -68,7 +70,7 @@ const App = () => {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const response = await fetch('/parse-image', {
+      const response = await fetch(`${API_URL}/parse-image`, { 
         method: 'POST',
         body: formData,
       });
@@ -91,7 +93,7 @@ const App = () => {
     if (!recipeUrl.trim()) return;
     setLoading(true);
     try {
-      const response = await fetch(`/parse-url?url=${encodeURIComponent(recipeUrl)}`, {
+      const response = await fetch(`${API_URL}/parse-url?url=${encodeURIComponent(recipeUrl)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
