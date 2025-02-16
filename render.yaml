@@ -4,19 +4,33 @@ services:
     name: recipe-calculator-api
     env: python
     buildCommand: |
-      # Install system dependencies
-      apt-get update && \
-      apt-get install -y tesseract-ocr tesseract-ocr-dan libtesseract-dev && \
-      ln -s /usr/bin/tesseract /usr/local/bin/tesseract
+      # Update package lists and install required packages
+      apt-get update -y
+      apt-get install -y software-properties-common
+      apt-get update -y
+      # Install Tesseract and Danish language pack with explicit error checking
+      apt-get install -y tesseract-ocr
+      if [ $? -ne 0 ]; then
+        echo "Failed to install tesseract-ocr"
+        exit 1
+      fi
+      apt-get install -y tesseract-ocr-dan
+      if [ $? -ne 0 ]; then
+        echo "Failed to install tesseract-ocr-dan"
+        exit 1
+      fi
+      # Verify Tesseract installation
+      tesseract --version
+      # Install Python dependencies
       pip install -r server/requirements.txt
     startCommand: cd server && uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.9.0
       - key: PYTHONPATH
         value: server
       - key: TESSDATA_PREFIX
         value: /usr/share/tesseract-ocr/4.00/tessdata
+      - key: PATH
+        value: /usr/bin:/usr/local/bin:$PATH
       
   # Frontend static site
   - type: web
