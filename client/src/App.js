@@ -23,10 +23,10 @@ const normalizeIngredient = (ingredientName) => {
 
 // Define food categories with keywords for categorization
 const FOOD_CATEGORIES = {
-  '🥩 Kød/Fisk': ['kød', 'bøf', 'bacon', 'laks', 'kotelet', 'reje', 'hummer', 'okse', 'oksekød', 'kylling', 'filet', 'bisk', 'torsk', 'kyllingebryst', 'kyllingelår'],
+  '🥩 Kød/Fisk': ['kød', 'bøf', 'bacon', 'laks', 'kotelet', 'reje', 'hummer', 'okse', 'oksekød', 'kylling', 'filet', 'bisk', 'torsk', 'kyllingebryst', 'kyllingelår', 'fiskefrikadeller', 'entrecotes'],
   '🧀 Mejeri': ['mælk', 'smør', 'æg', 'cremefraiche', 'fløde', 'yoghurt', 'ost', 'frossen spinat', 'græsk yoghurt', 'gær', ],
-  '🥫 Kolonial': ['mel', 'stivelse', 'stødt', 'tørret', 'krydder', 'kerner', 'mandler', 'nødder', 'pure', 'hakkede tomat', 'tahin', 'kikærter', 'cayenne', 'plader', 'bouillon', 'vin', 'olie','laurbærblade', 'sød paprika', 'paprika', 'muskatnød','pasta', 'fennikelfrø', 'sukker', 'mayonnaise', 'sennep', 'ris', 'garam masala', 'chiliflager', 'bulgur', 'butterbeans', 'honning'],
-  '🥕 Grønt': ['kartoffel', 'kartofler', 'løg', 'spidskål', 'hvidløg', 'salat', 'tomat', 'selleri', 'peberfrugt', 'champignon', 'squash', 'aubergine', 'gulerod', 'persille', 'basilikum', 'dild', 'æble', 'citron', 'granatæble', 'pinjekerner', 'rucola', 'ingefær', 'koriander', 'blomkål', 'grønkål']
+  '🥫 Kolonial': ['mel', 'stivelse', 'stødt', 'tørret', 'krydder', 'kerner', 'mandler', 'nødder', 'pure', 'hakkede tomat', 'tahin', 'kikærter', 'cayenne', 'fivespice', 'plader', 'bouillon', 'vin', 'olie','laurbærblade', 'sød paprika', 'paprika', 'muskatnød','pasta', 'fennikelfrø', 'sukker', 'mayonnaise', 'sennep', 'ris', 'garam masala', 'chiliflager', 'bulgur', 'butterbeans', 'honning', 'fishsauce', 'cornichoner', 'tranebær', 'brød', 'burgerboller'],
+  '🥕 Grønt': ['kartoffel', 'kartofler', 'løg', 'spidskål', 'hvidløg', 'salat', 'tomat', 'selleri', 'peberfrugt', 'champignon', 'agurk', 'squash', 'aubergine', 'gulerod', 'persille', 'røøg', 'basilikum', 'dild', 'æble', 'bønnespirer', 'lime', 'chili', 'citron', 'granatæble', 'pinjekerner', 'rucola', 'ingefær', 'koriander', 'blomkål', 'grønkål', 'hviøg', 'gulerødder']
 };
 
 // Function to parse Danish number format
