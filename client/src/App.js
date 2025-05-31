@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, Link, Users } from 'lucide-react';
+import { Upload, Link, Users, Plus, Trash2, X } from 'lucide-react';
 
 // Configuration for API
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -203,12 +203,17 @@ const formatDanishNumber = (num) => {
   return trimmed.replace('.', ',');
 };
 
-// Function to initialize the days state
+// Function to initialize the days state with recipe arrays
 const createInitialDays = () => {
   const weekdays = ['Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag'];
   return weekdays.reduce((acc, day) => ({
     ...acc,
-    [day]: { adults: 0, kids: 0, ingredients: [], servings: 4, successMessage: '' }
+    [day]: { 
+      adults: 0, 
+      kids: 0, 
+      recipes: [], // Changed from ingredients to recipes array
+      successMessage: '' 
+    }
   }), {});
 };
 
@@ -216,7 +221,23 @@ const App = () => {
   const [currentDay, setCurrentDay] = useState('Mandag');
   const [loading, setLoading] = useState(false);
   const [recipeUrl, setRecipeUrl] = useState('');
-  const [days, setDays] = useState(createInitialDays());
+  
+  // Helper function to ensure recipes array exists (for backward compatibility)
+  const ensureRecipesArray = (dayData) => {
+    if (!dayData.recipes) {
+      return { ...dayData, recipes: [] };
+    }
+    return dayData;
+  };
+
+  const [days, setDays] = useState(() => {
+    const initialDays = createInitialDays();
+    // Ensure all days have the recipes array
+    Object.keys(initialDays).forEach(day => {
+      initialDays[day] = { ...initialDays[day], recipes: initialDays[day].recipes || [] };
+    });
+    return initialDays;
+  });
 
   const handleFileChange = async (event) => {
     const file = event.target.files[0];
@@ -234,7 +255,7 @@ const App = () => {
       });
       const data = await response.json();
       if (data.success) {
-        updateIngredients(data.ingredients);
+        addNewRecipe(data.ingredients, 4); // Default to 4 servings for image uploads
         setSuccessMessage('✅ Ingredienser tilføjet til listen forneden 👇', currentDay);
       } else {
         // Show user-friendly error message for image processing failures
@@ -258,7 +279,9 @@ const App = () => {
       });
       const data = await response.json();
       if (data.success) {
-        updateIngredients(data.ingredients);
+        // Use the recipe name from the response, or fall back to generic name
+        const recipeName = data.recipeName || `Opskrift ${(days[currentDay].recipes || []).length + 1}`;
+        addNewRecipe(data.ingredients, 4, recipeName); // Pass the recipe name
         setRecipeUrl('');
         setSuccessMessage('✅ Ingredienser tilføjet til listen forneden 👇', currentDay);
       } else {
@@ -278,7 +301,7 @@ const App = () => {
     }));
   };
 
-  const updateIngredients = (ingredients) => {
+  const addNewRecipe = (ingredients, servings = 4, recipeName = null) => {
     // Filter and normalize ingredients - remove invalid ones
     const normalizedIngredients = ingredients
       .map(ingredient => {
@@ -305,9 +328,58 @@ const App = () => {
       }
     }
 
+    // Create new recipe object
+    const newRecipe = {
+      id: Date.now(), // Simple ID generation
+      ingredients: uniqueIngredients,
+      servings: servings,
+      name: recipeName || `Opskrift ${(days[currentDay].recipes || []).length + 1}` // Use provided name or default
+    };
+
     setDays(prev => ({
       ...prev,
-      [currentDay]: { ...prev[currentDay], ingredients: uniqueIngredients }
+      [currentDay]: { 
+        ...ensureRecipesArray(prev[currentDay]), 
+        recipes: [...(prev[currentDay].recipes || []), newRecipe]
+      }
+    }));
+  };
+
+  const deleteRecipe = (day, recipeId) => {
+    setDays(prev => ({
+      ...prev,
+      [day]: {
+        ...ensureRecipesArray(prev[day]),
+        recipes: (prev[day].recipes || []).filter(recipe => recipe.id !== recipeId)
+      }
+    }));
+  };
+
+  const updateRecipeServings = (day, recipeId, servings) => {
+    setDays(prev => ({
+      ...prev,
+      [day]: {
+        ...ensureRecipesArray(prev[day]),
+        recipes: (prev[day].recipes || []).map(recipe => 
+          recipe.id === recipeId 
+            ? { ...recipe, servings: parseInt(servings) || 0 }
+            : recipe
+        )
+      }
+    }));
+  };
+
+  const updateRecipeName = (day, recipeId, name) => {
+    setDays(prev => ({
+      ...prev,
+      [day]: {
+        ...ensureRecipesArray(prev[day]),
+        recipes: (prev[day].recipes || []).map(recipe => 
+          recipe.id === recipeId 
+            ? { ...recipe, name: name }
+            : recipe
+        )
+      }
     }));
   };
 
@@ -315,13 +387,6 @@ const App = () => {
     setDays(prev => ({
       ...prev,
       [day]: { ...prev[day], [type]: parseInt(value) || 0 }
-    }));
-  };
-
-  const updateServings = (day, value) => {
-    setDays(prev => ({
-      ...prev,
-      [day]: { ...prev[day], servings: parseInt(value) || 0 }
     }));
   };
 
@@ -405,9 +470,10 @@ const App = () => {
 
   const calculateTotalPeople = (adults, kids) => adults + (kids / 2);
 
-  const isCurrentDayValid = () => {
-    const { servings, adults, kids } = days[currentDay];
-    return servings > 0 && (adults > 0 || kids > 0);
+  // Updated validation: Only requires adults > 0 and URL field to be filled
+  const isSubmitValid = () => {
+    const { adults } = days[currentDay];
+    return adults > 0 && recipeUrl.trim() !== '';
   };
 
   // Enhanced ingredient categorization that considers units
@@ -431,20 +497,54 @@ const App = () => {
     )?.[0] || 'Ukategoriseret';
   };
 
+  // Get all ingredients from all recipes across all days
+  const getAllIngredients = () => {
+    const allIngredients = [];
+    
+    Object.entries(days).forEach(([dayName, dayData]) => {
+      const safeData = ensureRecipesArray(dayData);
+      safeData.recipes.forEach(recipe => {
+        recipe.ingredients.forEach(ingredient => {
+          const scaledIngredient = scaleIngredient(
+            ingredient, 
+            safeData.adults, 
+            safeData.kids, 
+            recipe.servings
+          );
+          allIngredients.push({
+            ...scaledIngredient,
+            day: dayName,
+            recipeName: recipe.name
+          });
+        });
+      });
+    });
+    
+    return allIngredients;
+  };
+
   // IngredientTable component
   const IngredientTable = ({ category }) => {
-    const groupedIngredients = Object.values(days)
-      .flatMap(day => day.ingredients)
-      .reduce((acc, ingredient) => {
-        const normName = normalizeIngredient(ingredient.name);
-        const key = `${normName}_${ingredient.unit}`;
-        if (!acc[key]) {
-          acc[key] = { ...ingredient, occurrences: 1 };
-        } else {
-          acc[key].occurrences += 1;
-        }
-        return acc;
-      }, {});
+    const allIngredients = getAllIngredients();
+    
+    // Group ingredients by name and unit
+    const groupedIngredients = allIngredients.reduce((acc, ingredient) => {
+      const normName = normalizeIngredient(ingredient.name);
+      const key = `${normName}_${ingredient.unit}`;
+      if (!acc[key]) {
+        acc[key] = { 
+          ...ingredient, 
+          occurrences: 1,
+          dayAmounts: { [ingredient.day]: ingredient.scaledAmount }
+        };
+      } else {
+        acc[key].occurrences += 1;
+        acc[key].dayAmounts[ingredient.day] = (acc[key].dayAmounts[ingredient.day] ? 
+          acc[key].dayAmounts[ingredient.day] + ', ' + ingredient.scaledAmount : 
+          ingredient.scaledAmount);
+      }
+      return acc;
+    }, {});
 
     const categoryIngredients = Object.values(groupedIngredients)
       .filter((ingredient) => categorizeIngredient(ingredient) === category);
@@ -490,28 +590,16 @@ const App = () => {
                   <td className="w-24 px-6 py-4 text-sm text-zinc-600">
                     {ingredient.unit || '-'}
                   </td>
-                  {Object.entries(days).map(([dayName, dayData]) => {
-                    const dayIngredient = dayData.ingredients.find(i => 
-                      normalizeIngredient(i.name) === normalizeIngredient(ingredient.name) && 
-                      i.unit === ingredient.unit
-                    );
-                    if (!dayIngredient) return (
+                  {Object.keys(days).map(dayName => {
+                    const dayAmount = ingredient.dayAmounts[dayName];
+                    if (!dayAmount) return (
                       <td key={dayName} className="w-36 px-6 py-4 text-sm text-zinc-400">-</td>
                     );
-                    const scaled = scaleIngredient(dayIngredient, dayData.adults, dayData.kids, dayData.servings);
-                    // Extract just the amount (remove unit from scaledAmount)
-                    const amountOnly = scaled.scaledAmount.replace(dayIngredient.unit, '').trim();
-                    const originalAmountOnly = scaled.originalAmount.replace(dayIngredient.unit, '').trim();
+                    const amountOnly = dayAmount.replace(ingredient.unit, '').trim();
                     return (
                       <td key={dayName} className="w-36 px-6 py-4">
-                        <div className={`text-sm font-medium ${amountOnly === '?' ? 'text-amber-600' : 'text-zinc-900'}`}>
+                        <div className={`text-sm font-medium ${amountOnly.includes('?') ? 'text-amber-600' : 'text-zinc-900'}`}>
                           {amountOnly}
-                        </div>
-                        <div className="text-xs text-zinc-500 mt-1">
-                          {amountOnly === '?' ? 
-                            'Tjek opskrift for mængde' : 
-                            `(original: ${originalAmountOnly} til ${dayData.servings} personer)`
-                          }
                         </div>
                       </td>
                     );
@@ -534,6 +622,7 @@ const App = () => {
     const headers = ['Kategori', 'Ingrediens', 'Enhed', ...weekdays, 'Total Mængde'];
     let csvContent = headers.join(';') + '\n';
 
+    const allIngredients = getAllIngredients();
     const ingredientsByCategory = {};
     
     categories.forEach(category => {
@@ -541,31 +630,31 @@ const App = () => {
     });
 
     // Collect all ingredients with their units
-    Object.entries(days).forEach(([dayName, dayData]) => {
-      dayData.ingredients.forEach((ingredient) => {
-        const normalizedName = normalizeIngredient(ingredient.name);
-        const category = categorizeIngredient(ingredient);
-        
-        const key = `${normalizedName}_${ingredient.unit}`;
-        
-        if (!ingredientsByCategory[category].has(key)) {
-          ingredientsByCategory[category].set(key, {
-            name: ingredient.name,
-            unit: ingredient.unit,
-            amounts: {},
-            totalAmount: 0
-          });
-        }
-        
-        const scaled = scaleIngredient(ingredient, dayData.adults, dayData.kids, dayData.servings);
-        const scaledNum = parseDanishNumber(scaled.scaledAmount.replace(ingredient.unit, ''));
-        
-        ingredientsByCategory[category].get(key).amounts[dayName] = scaled.scaledAmount;
-        // Only add to total if we have a valid number (not '?')
-        if (scaledNum !== '?' && typeof scaledNum === 'number') {
-          ingredientsByCategory[category].get(key).totalAmount += scaledNum;
-        }
-      });
+    allIngredients.forEach((ingredient) => {
+      const normalizedName = normalizeIngredient(ingredient.name);
+      const category = categorizeIngredient(ingredient);
+      
+      const key = `${normalizedName}_${ingredient.unit}`;
+      
+      if (!ingredientsByCategory[category].has(key)) {
+        ingredientsByCategory[category].set(key, {
+          name: ingredient.name,
+          unit: ingredient.unit,
+          amounts: {},
+          totalAmount: 0
+        });
+      }
+      
+      const scaledNum = parseDanishNumber(ingredient.scaledAmount.replace(ingredient.unit, ''));
+      
+      if (!ingredientsByCategory[category].get(key).amounts[ingredient.day]) {
+        ingredientsByCategory[category].get(key).amounts[ingredient.day] = ingredient.scaledAmount;
+      }
+      
+      // Only add to total if we have a valid number (not '?')
+      if (scaledNum !== '?' && typeof scaledNum === 'number') {
+        ingredientsByCategory[category].get(key).totalAmount += scaledNum;
+      }
     });
 
     // Generate CSV content
@@ -581,10 +670,17 @@ const App = () => {
           ];
           
           weekdays.forEach(day => {
-            row.push(ingredient.amounts[day] || '-');
+            const dayAmount = ingredient.amounts[day];
+            if (dayAmount) {
+              // Remove unit from the amount display - keep only numbers
+              const amountOnly = dayAmount.replace(ingredient.unit || '', '').trim();
+              row.push(amountOnly);
+            } else {
+              row.push('-');
+            }
           });
           
-          // Add total amount - handle unknown amounts properly
+          // Add total amount - handle unknown amounts properly, without unit
           const totalAmount = ingredient.totalAmount;
           let totalFormatted;
           if (totalAmount === 0 || isNaN(totalAmount)) {
@@ -592,7 +688,7 @@ const App = () => {
           } else {
             totalFormatted = formatDanishNumber(totalAmount);
           }
-          row.push(`${totalFormatted}${ingredient.unit}`);
+          row.push(totalFormatted); // No unit here, unit is already in column 3
           
           csvContent += row.join(';') + '\n';
         });
@@ -614,7 +710,7 @@ const App = () => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-zinc-50 to-zinc-100 py-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <h1 className="text-4xl font-bold text-zinc-900 mb-2">🍝 Opskriftberegner</h1>
+        <h1 className="text-4xl font-bold text-zinc-900 mb-2">🍝 Fælldedens opskriftberegner</h1>
         <p className="text-zinc-600 mb-8">Beregn ingredienser baseret på antal personer</p>
 
         <div className="bg-white rounded-2xl shadow-lg border border-zinc-100 p-8 mb-10">
@@ -644,19 +740,19 @@ const App = () => {
               <span className="text-base font-medium text-zinc-800">Antal personer for {currentDay}</span>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {['servings', 'adults', 'kids'].map(type => (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {['adults', 'kids'].map(type => (
                 <div key={type} className="flex flex-col gap-2">
                   <label className="text-sm font-medium text-zinc-700">
-                    {type === 'servings' ? 'Hvor mange personer er opskriften lavet til?' : type === 'adults' ? 'Voksne:' : 'Børn & Unge:'}
+                    {type === 'adults' ? 'Voksne:' : 'Børn & Unge:'}
                   </label>
                   <input
                     type="number"
                     min="0"
                     value={days[currentDay][type] || ''}
-                    onChange={(e) => type === 'servings' ? updateServings(currentDay, e.target.value) : updatePeople(currentDay, type, e.target.value)}
+                    onChange={(e) => updatePeople(currentDay, type, e.target.value)}
                     className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-600 focus:border-transparent transition-shadow"
-                    placeholder={type === 'servings' ? "4" : ""}
+                    placeholder=""
                   />
                 </div>
               ))}
@@ -683,36 +779,81 @@ const App = () => {
             <div className="space-y-4">
               <h3 className="text-xl font-semibold text-zinc-900">Tilføj Opskrift URL</h3>
               <form onSubmit={handleUrlSubmit} className="flex gap-3">
-                <div className="relative flex-grow group">
+                <div className="relative flex-grow">
                   <input
                     type="url"
                     value={recipeUrl}
                     onChange={(e) => setRecipeUrl(e.target.value)}
                     placeholder="Indsæt opskrift URL her"
                     className="w-full px-4 py-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-600 focus:border-transparent transition-all"
-                    disabled={loading || !isCurrentDayValid()}
+                    disabled={loading}
                   />
-                  {!isCurrentDayValid() && (
-                    <div className="absolute left-1/2 -translate-x-1/2 -top-10 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <div className="bg-zinc-800 text-white px-3 py-2 rounded-lg text-sm whitespace-nowrap">
-                        Indtast først antal voksne og børn
-                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-zinc-800 rotate-45"></div>
-                      </div>
-                    </div>
-                  )}
                 </div>
                 <button
                   type="submit"
-                  disabled={loading || !isCurrentDayValid()}
+                  disabled={loading || !isSubmitValid()}
                   className="flex items-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-xl hover:bg-zinc-800 disabled:bg-zinc-400 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md"
                 >
                   <Link className="w-5 h-5" />
                   {loading ? 'Behandler...' : 'Beregn'}
                 </button>
               </form>
+              {!isSubmitValid() && (
+                <p className="text-sm text-zinc-500">
+                  Indtast antal voksne og en URL for at tilføje opskrift
+                </p>
+              )}
             </div>
+          </div>
 
-
+          {/* Recipe Management Section */}
+          <div className="mt-8">
+            <h3 className="text-xl font-semibold text-zinc-900 mb-4">Opskrifter for {currentDay}</h3>
+            
+            {(days[currentDay].recipes || []).length === 0 ? (
+              <div className="text-center py-8 text-zinc-500">
+                <p>Ingen opskrifter tilføjet endnu</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {(days[currentDay].recipes || []).map((recipe, index) => (
+                  <div key={recipe.id} className="bg-zinc-50 rounded-lg p-4 border border-zinc-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3 flex-1">
+                        <input
+                          type="text"
+                          value={recipe.name}
+                          onChange={(e) => updateRecipeName(currentDay, recipe.id, e.target.value)}
+                          className="flex-1 px-3 py-2 bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-600 text-sm"
+                          placeholder="Opskriftnavn"
+                        />
+                        <div className="flex items-center gap-2">
+                          <label className="text-sm text-zinc-600">Portioner:</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={recipe.servings}
+                            onChange={(e) => updateRecipeServings(currentDay, recipe.id, e.target.value)}
+                            className="w-20 px-3 py-2 bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-600 text-sm"
+                          />
+                        </div>
+                        <button
+                          onClick={() => deleteRecipe(currentDay, recipe.id)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Slet opskrift"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="text-sm text-zinc-600">
+                      <span className="font-medium">{recipe.ingredients.length}</span> ingredienser
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

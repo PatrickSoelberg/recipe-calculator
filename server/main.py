@@ -29,6 +29,7 @@ class Ingredient(BaseModel):
 class RecipeResponse(BaseModel):
     ingredients: List[Ingredient]
     success: bool
+    recipeName: Optional[str] = None  # Added recipe name field
     error: Optional[str] = None
 
 # Enhanced Danish-specific corrections and mappings
@@ -306,9 +307,79 @@ def parse_ingredients_from_text(text: str) -> List[Ingredient]:
     
     return unique_ingredients
 
-def extract_recipe_data(url: str) -> List[Ingredient]:
+def extract_recipe_title(soup: BeautifulSoup) -> Optional[str]:
     """
-    Extract recipe data from URL
+    Extract recipe title from HTML using multiple strategies
+    """
+    # Strategy 1: Look for JSON-LD structured data first
+    script_tags = soup.find_all('script', {'type': 'application/ld+json'})
+    for script in script_tags:
+        try:
+            data = json.loads(script.string)
+            if isinstance(data, dict) and '@type' in data and data['@type'] == 'Recipe':
+                title = data.get('name')
+                if title and isinstance(title, str) and len(title.strip()) > 3:
+                    return title.strip()
+        except (json.JSONDecodeError, AttributeError):
+            continue
+    
+    # Strategy 2: Look for recipe-specific title selectors
+    recipe_title_selectors = [
+        '.recipe-title',
+        '.recipe-header h1',
+        '.recipe-name',
+        '.entry-title',
+        '.post-title',
+        '.recipe__title',
+        '.wprm-recipe-name',
+        '.opskrift-titel',
+        'h1.recipe',
+        '[itemprop="name"]'
+    ]
+    
+    for selector in recipe_title_selectors:
+        elements = soup.select(selector)
+        for element in elements:
+            title = element.get_text(strip=True)
+            if title and len(title) > 3 and len(title) < 200:  # Reasonable title length
+                # Clean the title
+                title = re.sub(r'\s+', ' ', title)  # Normalize whitespace
+                title = title.strip()
+                if title:
+                    logger.info(f"Found recipe title using selector '{selector}': {title}")
+                    return title
+    
+    # Strategy 3: Look for the main h1 tag, but be selective
+    h1_elements = soup.find_all('h1')
+    for h1 in h1_elements:
+        title = h1.get_text(strip=True)
+        if title and len(title) > 3 and len(title) < 200:
+            # Skip common non-recipe titles
+            skip_keywords = ['home', 'menu', 'blog', 'about', 'contact', 'search', 'kategori', 'arkiv']
+            if not any(keyword in title.lower() for keyword in skip_keywords):
+                logger.info(f"Found recipe title from h1: {title}")
+                return title
+    
+    # Strategy 4: Use page title as last resort, but clean it up
+    title_tag = soup.find('title')
+    if title_tag:
+        title = title_tag.get_text(strip=True)
+        if title and len(title) > 3:
+            # Clean up common title patterns
+            title = re.sub(r'\s*[-|–]\s*.*$', '', title)  # Remove " - Site Name" parts
+            title = re.sub(r'\s*\|\s*.*$', '', title)     # Remove " | Site Name" parts
+            title = title.strip()
+            if len(title) > 3 and len(title) < 200:
+                logger.info(f"Using cleaned page title: {title}")
+                return title
+    
+    logger.info("Could not find recipe title")
+    return None
+
+def extract_recipe_data(url: str) -> tuple[List[Ingredient], Optional[str]]:
+    """
+    Extract recipe data and title from URL
+    Returns: (ingredients, recipe_title)
     """
     try:
         headers = {
@@ -321,6 +392,9 @@ def extract_recipe_data(url: str) -> List[Ingredient]:
         
         soup = BeautifulSoup(response.text, 'html.parser', from_encoding='utf-8')
         
+        # Extract recipe title first
+        recipe_title = extract_recipe_title(soup)
+        
         # Try different methods to find ingredients
         ingredients = []
         
@@ -332,7 +406,7 @@ def extract_recipe_data(url: str) -> List[Ingredient]:
                 if isinstance(data, dict) and '@type' in data and data['@type'] == 'Recipe':
                     ingredients = parse_jsonld_ingredients(data)
                     if ingredients:
-                        return ingredients
+                        return ingredients, recipe_title
             except (json.JSONDecodeError, AttributeError):
                 continue
         
@@ -341,12 +415,12 @@ def extract_recipe_data(url: str) -> List[Ingredient]:
         if ingredient_elements:
             ingredients = parse_html_ingredients(ingredient_elements)
             if ingredients:
-                return ingredients
+                return ingredients, recipe_title
         
         # Method 3: Fall back to generic list parsing
         ingredients = parse_generic_lists(soup)
         
-        return ingredients
+        return ingredients, recipe_title
         
     except Exception as e:
         logger.error(f"Error extracting recipe data: {str(e)}")
@@ -462,7 +536,8 @@ async def parse_image(file: UploadFile = File(...)):
         
         return RecipeResponse(
             ingredients=ingredients,
-            success=True
+            success=True,
+            recipeName=None  # No recipe name from images
         )
         
     except Exception as e:
@@ -472,20 +547,22 @@ async def parse_image(file: UploadFile = File(...)):
 @app.post("/parse-url", response_model=RecipeResponse)
 async def parse_url(url: str = Query(...)):
     """
-    Parse ingredients from a recipe URL
+    Parse ingredients and recipe name from a recipe URL
     """
     try:
-        ingredients = extract_recipe_data(url)
+        ingredients, recipe_title = extract_recipe_data(url)
         
         if not ingredients:
             return RecipeResponse(
                 ingredients=[],
                 success=False,
+                recipeName=recipe_title,  # Still return title even if no ingredients
                 error="Kunne ikke finde ingredienser på siden"
             )
         
         return RecipeResponse(
             ingredients=ingredients,
+            recipeName=recipe_title,  # Include the extracted recipe title
             success=True
         )
         
@@ -521,6 +598,29 @@ async def test_parsing():
         })
     
     return {"test_results": results}
+
+# Test endpoint for title extraction
+@app.get("/test-title")
+async def test_title_extraction(url: str = Query(...)):
+    """
+    Test endpoint to verify title extraction
+    """
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        title = extract_recipe_title(soup)
+        
+        return {
+            "url": url,
+            "extracted_title": title,
+            "page_title": soup.find('title').get_text(strip=True) if soup.find('title') else None
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
