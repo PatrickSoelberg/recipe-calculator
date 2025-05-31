@@ -31,7 +31,7 @@ class RecipeResponse(BaseModel):
     success: bool
     error: Optional[str] = None
 
-# Danish-specific corrections and mappings
+# Enhanced Danish-specific corrections and mappings
 DANISH_CORRECTIONS = {
     'ræsk': 'græsk',
     'yohurt': 'yoghurt',
@@ -43,14 +43,22 @@ DANISH_CORRECTIONS = {
     'pakher': 'pakker',
     'daser': 'dåser',
     'dose': 'dåse',
-    'hviøg': 'hvidløg',
     'øg': 'løg',
     'røøg': 'rødløg',
     'fed hviøg': 'fed hvidløg',
+    'citroner': 'citron',
+    'kartofier': 'kartofler',
+    'guierod': 'gulerod',
+    'guierødder': 'gulerødder',
+    'tomatcr': 'tomater',
+    'basilikuni': 'basilikum',
+    'persilje': 'persille',
     # Add more corrections as needed
 }
 
+# CRITICAL: Proper Danish units - do NOT convert special units
 DANISH_UNITS = {
+    # Standard abbreviations that should be expanded
     'spsk': 'spiseske',
     'tsk': 'teske',
     'stk': 'stykker',
@@ -62,8 +70,28 @@ DANISH_UNITS = {
     'ml': 'milliliter',
     'cl': 'centiliter',
     'ds': 'dåse',
-    'dåse': 'dåse',
-    # Add more units as needed
+    # DO NOT include special units like 'fed', 'håndfuld' here!
+}
+
+# Special Danish units that should NEVER be converted
+SPECIAL_DANISH_UNITS = {
+    'fed', 'håndfuld', 'håndfulde', 'knivspids', 'pind', 'pose', 'bundt', 
+    'bundle', 'neve', 'klat', 'skive', 'klump'
+}
+
+# More conservative ingredient core mapping - only very specific cases
+INGREDIENT_CORE_MAPPING = {
+    'hvidløg': ['hvidløgsfed'],  # Only map very specific variations
+    'persille': ['bredbladet persille', 'bladpersille'],
+    'basilikum': ['frisk basilikum'],
+    'tomater': ['hakkede tomater', 'cherry tomater', 'cocktail tomater']
+}
+
+# Words that should never be considered ingredients
+NON_INGREDIENT_WORDS = {
+    'styrke', 'mere', 'mindre', 'efter', 'smag', 'behov', 'ønske', 'cirka', 'ca',
+    'evt', 'eventuelt', 'til', 'som', 'eller', 'og', 'af', 'med', 'uden', 'for',
+    'servering', 'pynt', 'garnering', 'side', 'ekstra', 'let', 'god', 'fin', 'stor', 'lille'
 }
 
 # Find Tesseract executable by checking common locations
@@ -131,95 +159,152 @@ def clean_danish_text(text: str) -> str:
         if word in DANISH_CORRECTIONS:
             words[i] = DANISH_CORRECTIONS[word]
         
-        # Expand unit abbreviations
+        # Expand unit abbreviations ONLY for standard units
         if word in DANISH_UNITS:
             words[i] = DANISH_UNITS[word]
     
     return ' '.join(words)
 
-def preserve_special_chars(text: str) -> str:
+def clean_ingredient_name(raw_name: str) -> str:
     """
-    Preserve special characters and handle common OCR issues
+    More conservative ingredient name cleaning
     """
-    # Replace common problematic character sequences
-    text = text.replace('æ', 'ae').replace('ø', 'oe').replace('å', 'aa')
-    text = text.replace('Æ', 'Ae').replace('Ø', 'Oe').replace('Å', 'Aa')
+    clean_name = raw_name.lower().strip()
     
-    # Handle special cases for 'l' character
-    words = text.split()
-    for i, word in enumerate(words):
-        # If it's a standalone 'l' after a number, it's likely a unit
-        if word == 'l' and i > 0 and words[i-1].replace(',', '').replace('.', '').isdigit():
-            continue
-        # Replace 'l' with 'L' in other cases to preserve it
-        if 'l' in word:
-            words[i] = word.replace('l', 'L')
+    # Only remove very specific instruction patterns
+    specific_patterns = [
+        r',?\s*(saft og .*skal.*)',     # "saft og fintrevet skal heraf"
+        r',?\s*(kun saften)',           # "kun saften"
+        r'\(.*?\)',                     # Remove parenthetical content
+    ]
     
-    return ' '.join(words)
+    for pattern in specific_patterns:
+        clean_name = re.sub(pattern, '', clean_name, flags=re.IGNORECASE)
+    
+    # Only remove clear preparation terms, not descriptive words
+    prep_terms = [
+        'finthakkede', 'fintrevet', 'hakket', 'finsnittet', 'opskåret', 'skårne', 'skåret',
+        'delte', 'opdelte', 'smuldret', 'fintsnittet', 'groftrevet', 'kogte', 'ristede',
+        'sautéede', 'opvarmede', 'grillede', 'stegte', 'blancherede', 'røget',
+        'skrællede', 'rensede', 'pressede', 'finthakket', 'grofthakket'
+    ]
+    
+    prep_pattern = r'\b(' + '|'.join(prep_terms) + r')\b'
+    clean_name = re.sub(prep_pattern, '', clean_name, flags=re.IGNORECASE)
+    
+    # Clean up punctuation and spaces
+    clean_name = re.sub(r'[,.-]+$', '', clean_name)  # Remove trailing punctuation
+    clean_name = re.sub(r'^[,.-]+', '', clean_name)  # Remove leading punctuation
+    clean_name = re.sub(r'\s+', ' ', clean_name)     # Normalize spaces
+    clean_name = clean_name.strip()
+    
+    # Check if it's a non-ingredient word
+    if clean_name in NON_INGREDIENT_WORDS:
+        return None  # Don't return non-ingredients
+    
+    # Only map very specific cases, preserve most original names
+    for core_ingredient, variations in INGREDIENT_CORE_MAPPING.items():
+        if clean_name in variations:
+            return core_ingredient
+    
+    # Return the cleaned name as-is (don't extract "last word")
+    return clean_name if clean_name else None
+
+def normalize_unit(unit: str) -> str:
+    """
+    Normalize unit but preserve special Danish units
+    """
+    if not unit:
+        return ''
+    
+    unit_lower = unit.lower().strip()
+    
+    # CRITICAL: Never convert special Danish units
+    if unit_lower in SPECIAL_DANISH_UNITS:
+        return unit_lower
+    
+    # Only convert standard abbreviations
+    return DANISH_UNITS.get(unit_lower, unit_lower)
 
 def parse_ingredient_text(text: str) -> Optional[Ingredient]:
     """
-    Parse ingredient text into structured data
+    Enhanced ingredient parsing that preserves special Danish units
     """
-    # Clean and normalize text
-    text = clean_danish_text(text)
+    text = text.strip()
+    if not text:
+        return None
     
-    # Define units pattern including expanded forms
-    units_pattern = r'({}|{})'.format(
-        '|'.join(DANISH_UNITS.keys()),
-        '|'.join(DANISH_UNITS.values())
+    # Extract amount (handle fractions, ranges, and question marks)
+    amount_pattern = r'^(\d+(?:[.,/]\d+)?(?:\s*-\s*\d+(?:[.,/]\d+)?)?|\?|\d+\s*½|\d+\s*¼|\d+\s*¾|½|¼|¾)'
+    amount_match = re.search(amount_pattern, text)
+    
+    amount = '?'
+    remaining_text = text
+    
+    if amount_match:
+        amount = amount_match.group(1)
+        remaining_text = text[amount_match.end():].strip()
+    
+    # Extract unit - be very careful with special units
+    all_units = list(DANISH_UNITS.keys()) + list(DANISH_UNITS.values()) + list(SPECIAL_DANISH_UNITS)
+    # Sort by length descending to match longer units first (e.g., "håndfulde" before "håndfuld")
+    unit_pattern = r'^(' + '|'.join(sorted(all_units, key=len, reverse=True)) + r')\b'
+    unit_match = re.search(unit_pattern, remaining_text, re.IGNORECASE)
+    
+    unit = ''
+    ingredient_text = remaining_text
+    
+    if unit_match:
+        unit = normalize_unit(unit_match.group(1))
+        ingredient_text = remaining_text[unit_match.end():].strip()
+    
+    # Clean the ingredient name
+    ingredient_name = clean_ingredient_name(ingredient_text)
+    
+    if not ingredient_name:
+        return None
+    
+    return Ingredient(
+        name=ingredient_name,
+        amount=amount,
+        unit=unit
     )
-    
-    # Look for number followed by optional unit
-    number_match = re.search(r'\d+(?:[.,]\d+)?', text)
-    unit_match = re.search(units_pattern, text, re.IGNORECASE)
-    
-    if number_match:
-        amount = number_match.group()
-        unit = unit_match.group() if unit_match else ''
-        
-        # Get the standardized form of the unit if it exists
-        if unit.lower() in DANISH_UNITS:
-            unit = DANISH_UNITS[unit.lower()]
-        
-        # Extract name by removing amount and unit
-        name = text
-        if unit:
-            name = re.sub(f'{amount}|{unit}', '', name, flags=re.IGNORECASE)
-        else:
-            name = re.sub(f'{amount}', '', name)
-        
-        name = name.strip(' ,-')
-        
-        if name:  # Only return if we found a name
-            return Ingredient(
-                name=name,
-                amount=amount,
-                unit=unit
-            )
-    return None
 
 def parse_ingredients_from_text(text: str) -> List[Ingredient]:
     """
-    Parse multiple ingredients from text
+    Parse multiple ingredients from text with improved cleaning
     """
     lines = text.split('\n')
     ingredients = []
     
     for line in lines:
         line = line.strip()
-        if not line:
+        if not line or len(line) < 3:
             continue
         
-        # Skip long lines (likely instructions)
-        if len(line.split()) > 8:
+        # Skip lines that are clearly instructions (too long or contain instruction words)
+        instruction_indicators = ['bland', 'tilsæt', 'hæld', 'kog', 'steg', 'varm', 'server', 'rør', 'kom']
+        if (len(line.split()) > 10 or 
+            any(indicator in line.lower() for indicator in instruction_indicators)):
             continue
         
         parsed = parse_ingredient_text(line)
-        if parsed:
+        if parsed and parsed.name:  # Only add if we have a valid name
             ingredients.append(parsed)
     
-    return ingredients
+    # Deduplicate ingredients by name and unit
+    unique_ingredients = []
+    seen = set()
+    
+    for ingredient in ingredients:
+        key = f"{ingredient.name.lower()}_{ingredient.unit.lower()}"
+        if key not in seen:
+            seen.add(key)
+            unique_ingredients.append(ingredient)
+        else:
+            logger.info(f"Skipping duplicate ingredient: {ingredient.name} ({ingredient.unit})")
+    
+    return unique_ingredients
 
 def extract_recipe_data(url: str) -> List[Ingredient]:
     """
@@ -251,7 +336,7 @@ def extract_recipe_data(url: str) -> List[Ingredient]:
             except (json.JSONDecodeError, AttributeError):
                 continue
         
-        # Method 2: Look for common recipe ingredient patterns
+        # Method 2: Look for common recipe ingredient patterns  
         ingredient_elements = find_ingredient_elements(soup)
         if ingredient_elements:
             ingredients = parse_html_ingredients(ingredient_elements)
@@ -264,6 +349,7 @@ def extract_recipe_data(url: str) -> List[Ingredient]:
         return ingredients
         
     except Exception as e:
+        logger.error(f"Error extracting recipe data: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Failed to parse recipe: {str(e)}")
 
 def parse_jsonld_ingredients(data: dict) -> List[Ingredient]:
@@ -280,7 +366,7 @@ def parse_jsonld_ingredients(data: dict) -> List[Ingredient]:
     
     return ingredients
 
-def find_ingredient_elements(soup: BeautifulSoup) -> List[str]:
+def find_ingredient_elements(soup: BeautifulSoup) -> List:
     """
     Find ingredient elements in HTML using common selectors
     """
@@ -295,28 +381,38 @@ def find_ingredient_elements(soup: BeautifulSoup) -> List[str]:
         '.ingredient-group',
         '.recipe-ingredients__list',
         '.ingredienser',
+        # WP Recipe Maker specific selectors
+        '.wprm-recipe-ingredient',
+        '.wprm-recipe-ingredients',
         # Add more selectors as needed
     ]
     
     for selector in possible_selectors:
         elements = soup.select(selector)
         if elements:
+            logger.info(f"Found ingredients using selector: {selector}")
             return elements
     
     return []
 
-def parse_html_ingredients(elements: List[str]) -> List[Ingredient]:
+def parse_html_ingredients(elements: List) -> List[Ingredient]:
     """
     Parse ingredients from HTML elements
     """
     ingredients = []
     for element in elements:
-        items = element.find_all('li') or [element]
+        # Handle both list items and direct text content
+        if element.find_all('li'):
+            items = element.find_all('li')
+        else:
+            items = [element]
+            
         for item in items:
             text = item.get_text(strip=True)
-            parsed = parse_ingredient_text(text)
-            if parsed:
-                ingredients.append(parsed)
+            if text and len(text) > 2:  # Skip very short texts
+                parsed = parse_ingredient_text(text)
+                if parsed:
+                    ingredients.append(parsed)
     
     return ingredients
 
@@ -327,9 +423,10 @@ def parse_generic_lists(soup: BeautifulSoup) -> List[Ingredient]:
     ingredients = []
     for list_item in soup.find_all('li'):
         text = list_item.get_text(strip=True)
-        parsed = parse_ingredient_text(text)
-        if parsed:
-            ingredients.append(parsed)
+        if text and len(text) > 2:  # Skip very short texts
+            parsed = parse_ingredient_text(text)
+            if parsed:
+                ingredients.append(parsed)
     
     return ingredients
 
@@ -369,6 +466,7 @@ async def parse_image(file: UploadFile = File(...)):
         )
         
     except Exception as e:
+        logger.error(f"Error processing image: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/parse-url", response_model=RecipeResponse)
@@ -392,4 +490,38 @@ async def parse_url(url: str = Query(...)):
         )
         
     except Exception as e:
+        logger.error(f"Error processing URL: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
+
+# Test endpoint for debugging
+@app.get("/test-parsing")
+async def test_parsing():
+    """
+    Test endpoint to verify parsing logic
+    """
+    test_ingredients = [
+        "6 fed hvidløg",
+        "2 håndfulde bredbladet persille, finthakket",
+        "1/2 citron, saft og fintrevet skal heraf",
+        "3 store kartofler, skrællede og skåret i kvarte",
+        "1 tsk salt",
+        "2 dl mælk",
+        "500 g pasta",
+        "1 chili",
+        "styrke",
+        "mere"
+    ]
+    
+    results = []
+    for ingredient_text in test_ingredients:
+        parsed = parse_ingredient_text(ingredient_text)
+        results.append({
+            "original": ingredient_text,
+            "parsed": parsed.dict() if parsed else None
+        })
+    
+    return {"test_results": results}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
