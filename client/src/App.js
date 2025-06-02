@@ -39,11 +39,12 @@ const INGREDIENT_CORE_MAPPING = {
   'tomater': ['hakkede tomater', 'cherry tomater', 'cocktail tomater']
 };
 
-// Words that should never be considered ingredients
+// Words that should never be considered ingredients - including vand, salt, peber
 const NON_INGREDIENT_WORDS = new Set([
   'styrke', 'mere', 'mindre', 'efter', 'smag', 'behov', 'ønske', 'cirka', 'ca',
   'evt', 'eventuelt', 'til', 'som', 'eller', 'og', 'af', 'med', 'uden', 'for',
-  'servering', 'pynt', 'garnering', 'side', 'ekstra'
+  'servering', 'pynt', 'garnering', 'side', 'ekstra', 'vand', 'salt', 'peber', 
+  'salt og peber', 'friskkværnet peber', 'salt og friskkværnet peber'
 ]);
 
 // Much more conservative ingredient name cleaning
@@ -211,16 +212,23 @@ const createInitialDays = () => {
     [day]: { 
       adults: 0, 
       kids: 0, 
-      recipes: [], // Changed from ingredients to recipes array
+      teens: 0,
+      recipes: [],
       successMessage: '' 
     }
   }), {});
 };
 
 const App = () => {
-  const [currentDay, setCurrentDay] = useState('Mandag');
+  const [activeTab, setActiveTab] = useState('Oversigt');
   const [loading, setLoading] = useState(false);
-  const [recipeUrl, setRecipeUrl] = useState('');
+  const [recipeUrls, setRecipeUrls] = useState({
+    'Mandag': '',
+    'Tirsdag': '',
+    'Onsdag': '',
+    'Torsdag': '',
+    'Fredag': ''
+  });
   
   // Helper function to ensure recipes array exists (for backward compatibility)
   const ensureRecipesArray = (dayData) => {
@@ -239,56 +247,77 @@ const App = () => {
     return initialDays;
   });
 
-  const handleFileChange = async (event) => {
-    const file = event.target.files[0];
-    if (!file || !file.type.startsWith('image/')) {
-      alert('Venligst vælg en billedfil (PNG, JPG)');
-      return;
-    }
-    setLoading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const response = await fetch(`${API_URL}/parse-image`, { 
-        method: 'POST',
-        body: formData,
-      });
-      const data = await response.json();
-      if (data.success) {
-        addNewRecipe(data.ingredients, 4); // Default to 4 servings for image uploads
-        setSuccessMessage('✅ Ingredienser tilføjet til listen forneden 👇', currentDay);
-      } else {
-        // Show user-friendly error message for image processing failures
-        setSuccessMessage('❌ Kunne ikke læse billedet. Prøv at tage et billede af opskriften i bedre lys eller tættere på.', currentDay);
-      }
-    } catch (error) {
-      setSuccessMessage('❌ Der opstod en fejl under behandling af filen', currentDay);
-    } finally {
-      setLoading(false);
-    }
+  // Calculate total people for a day (V + B/2 + O/2)
+  const calculateTotalPeople = (adults, kids, teens) => {
+    return adults + (kids / 2) + (teens / 2);
   };
 
-  const handleUrlSubmit = async (e) => {
+  // Calculate tables needed (total people / 6, rounded up)
+  const calculateTables = (adults, kids, teens) => {
+    const totalPeople = adults + kids + teens;
+    return Math.ceil(totalPeople / 6);
+  };
+
+  // Calculate cost for a day (without 15% deduction, excluding O - små børn)
+  const calculateCost = (day, adults, kids, teens) => {
+    const isFriday = day === 'Fredag';
+    const pricePerAdult = isFriday ? 60 : 44;
+    const pricePerChild = pricePerAdult / 2;
+    
+    // Only include adults and kids, exclude teens (små børn)
+    return (adults * pricePerAdult) + (kids * pricePerChild);
+  };
+
+  // Calculate total cost for all days
+  const calculateTotalCost = () => {
+    return Object.entries(days).reduce((total, [dayName, dayData]) => {
+      const cost = calculateCost(dayName, dayData.adults, dayData.kids, dayData.teens);
+      return total + cost;
+    }, 0);
+  };
+
+  // Calculate 15% of total (Basisvarer)
+  const calculateBasisvarer = () => {
+    const totalCost = calculateTotalCost();
+    return totalCost * 0.15;
+  };
+
+  // Calculate amount for purchaser (Total - 15%)
+  const calculateTilIndkøber = () => {
+    const totalCost = calculateTotalCost();
+    const basisvarer = calculateBasisvarer();
+    return totalCost - basisvarer;
+  };
+
+  const updatePeople = (day, type, value) => {
+    setDays(prev => ({
+      ...prev,
+      [day]: { ...prev[day], [type]: parseInt(value) || 0 }
+    }));
+  };
+
+  const handleUrlSubmit = async (day, e) => {
     e.preventDefault();
-    if (!recipeUrl.trim()) return;
+    const url = recipeUrls[day];
+    if (!url.trim()) return;
+    
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/parse-url?url=${encodeURIComponent(recipeUrl)}`, {
+      const response = await fetch(`${API_URL}/parse-url?url=${encodeURIComponent(url)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
       const data = await response.json();
       if (data.success) {
-        // Use the recipe name from the response, or fall back to generic name
-        const recipeName = data.recipeName || `Opskrift ${(days[currentDay].recipes || []).length + 1}`;
-        addNewRecipe(data.ingredients, 4, recipeName); // Pass the recipe name
-        setRecipeUrl('');
-        setSuccessMessage('✅ Ingredienser tilføjet til listen forneden 👇', currentDay);
+        const recipeName = data.recipeName || `Opskrift ${(days[day].recipes || []).length + 1}`;
+        addNewRecipe(day, data.ingredients, 4, recipeName);
+        setRecipeUrls(prev => ({ ...prev, [day]: '' }));
+        setSuccessMessage(`✅ Ingredienser tilføjet til ${day}`, day);
       } else {
-        setSuccessMessage('❌ Kunne ikke finde ingredienser på siden. Prøv en anden opskrift URL.', currentDay);
+        setSuccessMessage(`❌ Kunne ikke finde ingredienser på siden for ${day}`, day);
       }
     } catch (error) {
-      setSuccessMessage('❌ Der opstod en fejl under behandling af URLen', currentDay);
+      setSuccessMessage(`❌ Der opstod en fejl under behandling af URLen for ${day}`, day);
     } finally {
       setLoading(false);
     }
@@ -299,14 +328,28 @@ const App = () => {
       ...prev,
       [day]: { ...prev[day], successMessage: message }
     }));
+    // Clear message after 5 seconds
+    setTimeout(() => {
+      setDays(prev => ({
+        ...prev,
+        [day]: { ...prev[day], successMessage: '' }
+      }));
+    }, 5000);
   };
 
-  const addNewRecipe = (ingredients, servings = 4, recipeName = null) => {
-    // Filter and normalize ingredients - remove invalid ones
+  // Function to check if ingredient should be excluded
+  const shouldExcludeIngredient = (ingredientName) => {
+    const name = ingredientName.toLowerCase().trim();
+    const excludedIngredients = ['vand', 'salt', 'peber', 'salt og peber', 'friskkværnet peber', 'salt og friskkværnet peber'];
+    return excludedIngredients.includes(name) || NON_INGREDIENT_WORDS.has(name);
+  };
+
+  const addNewRecipe = (day, ingredients, servings = 4, recipeName = null) => {
+    // Filter and normalize ingredients - remove invalid ones and excluded ingredients
     const normalizedIngredients = ingredients
       .map(ingredient => {
         const cleanedName = normalizeIngredient(ingredient.name);
-        if (!cleanedName) return null; // Filter out invalid ingredients
+        if (!cleanedName || shouldExcludeIngredient(cleanedName)) return null;
         
         return {
           ...ingredient,
@@ -333,14 +376,14 @@ const App = () => {
       id: Date.now(), // Simple ID generation
       ingredients: uniqueIngredients,
       servings: servings,
-      name: recipeName || `Opskrift ${(days[currentDay].recipes || []).length + 1}` // Use provided name or default
+      name: recipeName || `Opskrift ${(days[day].recipes || []).length + 1}`
     };
 
     setDays(prev => ({
       ...prev,
-      [currentDay]: { 
-        ...ensureRecipesArray(prev[currentDay]), 
-        recipes: [...(prev[currentDay].recipes || []), newRecipe]
+      [day]: { 
+        ...ensureRecipesArray(prev[day]), 
+        recipes: [...(prev[day].recipes || []), newRecipe]
       }
     }));
   };
@@ -383,17 +426,8 @@ const App = () => {
     }));
   };
 
-  const updatePeople = (day, type, value) => {
-    setDays(prev => ({
-      ...prev,
-      [day]: { ...prev[day], [type]: parseInt(value) || 0 }
-    }));
-  };
-
   // Enhanced scaling function that handles unknown amounts properly
-  const scaleIngredient = (ingredient, adults, kids, originalServings) => {
-    const targetServings = adults + (kids / 2);
-    
+  const scaleIngredient = (ingredient, totalPeople, originalServings) => {
     // Handle unknown amounts transparently
     if (ingredient.amount === '?' || ingredient.amount === '') {
       return {
@@ -414,7 +448,7 @@ const App = () => {
       };
     }
     
-    const scalingFactor = targetServings / originalServings;
+    const scalingFactor = totalPeople / originalServings;
     
     // Parse the original amount using enhanced parsing
     const originalAmount = parseDanishNumber(ingredient.amount);
@@ -457,28 +491,19 @@ const App = () => {
       ...ingredient,
       originalAmount: `${ingredient.amount}${ingredient.unit}`,
       scaledAmount: `${formattedAmount}${ingredient.unit}`,
-      scalingFactor: scalingFactor,
-      // Add debug info for troubleshooting
-      debugInfo: {
-        originalParsed: originalAmount,
-        scaled: scaledAmount,
-        final: finalScaledAmount,
-        factor: scalingFactor
-      }
+      scalingFactor: scalingFactor
     };
-  };
-
-  const calculateTotalPeople = (adults, kids) => adults + (kids / 2);
-
-  // Updated validation: Only requires adults > 0 and URL field to be filled
-  const isSubmitValid = () => {
-    const { adults } = days[currentDay];
-    return adults > 0 && recipeUrl.trim() !== '';
   };
 
   // Enhanced ingredient categorization that considers units
   const categorizeIngredient = (ingredient) => {
     const normalizedName = normalizeIngredient(ingredient.name);
+    
+    // Handle case where normalizeIngredient returns null
+    if (!normalizedName) {
+      return 'Ukategoriseret';
+    }
+    
     const unit = ingredient.unit ? ingredient.unit.toLowerCase() : '';
     
     // Use unit information to help with categorization
@@ -503,12 +528,13 @@ const App = () => {
     
     Object.entries(days).forEach(([dayName, dayData]) => {
       const safeData = ensureRecipesArray(dayData);
+      const totalPeople = calculateTotalPeople(safeData.adults, safeData.kids, safeData.teens);
+      
       safeData.recipes.forEach(recipe => {
         recipe.ingredients.forEach(ingredient => {
           const scaledIngredient = scaleIngredient(
             ingredient, 
-            safeData.adults, 
-            safeData.kids, 
+            totalPeople, 
             recipe.servings
           );
           allIngredients.push({
@@ -523,164 +549,81 @@ const App = () => {
     return allIngredients;
   };
 
-  // IngredientTable component
-  const IngredientTable = ({ category }) => {
-    const allIngredients = getAllIngredients();
+  // Export all data to single CSV file
+  const exportToExcel = () => {
+    let csvContent = '';
     
-    // Group ingredients by name and unit
-    const groupedIngredients = allIngredients.reduce((acc, ingredient) => {
-      const normName = normalizeIngredient(ingredient.name);
-      const key = `${normName}_${ingredient.unit}`;
-      if (!acc[key]) {
-        acc[key] = { 
-          ...ingredient, 
-          occurrences: 1,
-          dayAmounts: { [ingredient.day]: ingredient.scaledAmount }
-        };
-      } else {
-        acc[key].occurrences += 1;
-        acc[key].dayAmounts[ingredient.day] = (acc[key].dayAmounts[ingredient.day] ? 
-          acc[key].dayAmounts[ingredient.day] + ', ' + ingredient.scaledAmount : 
-          ingredient.scaledAmount);
-      }
-      return acc;
-    }, {});
-
-    const categoryIngredients = Object.values(groupedIngredients)
-      .filter((ingredient) => categorizeIngredient(ingredient) === category);
-
-    if (categoryIngredients.length === 0) return null;
-
-    return (
-      <div key={category} className="mb-10">
-        <h3 className={`text-xl font-semibold mb-6 ${category === 'Ukategoriseret' ? 'text-amber-600' : 'text-zinc-900'}`}>
-          {category}
-        </h3>
-        <div className="overflow-x-auto">
-          <table className="min-w-full table-fixed border-separate border-spacing-0">
-            <thead>
-              <tr className="bg-zinc-50 rounded-lg">
-                <th className="w-64 px-6 py-4 text-left text-sm font-semibold text-zinc-900 first:rounded-l-lg">
-                  Ingrediens
-                </th>
-                <th className="w-24 px-6 py-4 text-left text-sm font-semibold text-zinc-900">
-                  Enhed
-                </th>
-                {Object.keys(days).map(day => (
-                  <th key={day} className="w-36 px-6 py-4 text-left text-sm font-semibold text-zinc-900 last:rounded-r-lg">
-                    <div className="font-semibold">{day}</div>
-                    <div className="text-xs font-normal text-zinc-500 mt-1">
-                      {calculateTotalPeople(days[day].adults, days[day].kids)} personer
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100">
-              {categoryIngredients.map(ingredient => (
-                <tr key={`${ingredient.name}_${ingredient.unit}`} className="hover:bg-zinc-50 transition-colors">
-                  <td className="w-64 px-6 py-4 text-sm text-zinc-900">
-                    <div className="font-medium whitespace-pre-wrap break-words">
-                      {ingredient.name}
-                    </div>
-                    <div className="text-zinc-500 font-normal mt-1">
-                      ({ingredient.occurrences} gange)
-                    </div>
-                  </td>
-                  <td className="w-24 px-6 py-4 text-sm text-zinc-600">
-                    {ingredient.unit || '-'}
-                  </td>
-                  {Object.keys(days).map(dayName => {
-                    const dayAmount = ingredient.dayAmounts[dayName];
-                    if (!dayAmount) return (
-                      <td key={dayName} className="w-36 px-6 py-4 text-sm text-zinc-400">-</td>
-                    );
-                    const amountOnly = dayAmount.replace(ingredient.unit, '').trim();
-                    return (
-                      <td key={dayName} className="w-36 px-6 py-4">
-                        <div className={`text-sm font-medium ${amountOnly.includes('?') ? 'text-amber-600' : 'text-zinc-900'}`}>
-                          {amountOnly}
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  };
-
-  // Enhanced CSV export that preserves measurement accuracy
-  const exportToCSV = () => {
-    const categories = ['🥩 Kød/Fisk', '🧀 Mejeri', '🥕 Grønt', '🥫 Kolonial', 'Ukategoriseret'];
-    const weekdays = ['Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag'];
-
-    // Use semicolon as delimiter for better Excel compatibility in Denmark
-    const headers = ['Kategori', 'Ingrediens', 'Enhed', ...weekdays, 'Total Mængde'];
-    let csvContent = headers.join(';') + '\n';
+    // Section 1: Oversigt
+    csvContent += 'OVERSIGT\n';
+    csvContent += 'Dag;V;B;O;Total;Borde;Beløb\n';
+    
+    Object.entries(days).forEach(([dayName, dayData]) => {
+      csvContent += `${dayName};${dayData.adults || 0};${dayData.kids || 0};${dayData.teens || 0};${formatDanishNumber(calculateTotalPeople(dayData.adults, dayData.kids, dayData.teens))};${calculateTables(dayData.adults, dayData.kids, dayData.teens)};${Math.round(calculateCost(dayName, dayData.adults, dayData.kids, dayData.teens))}\n`;
+    });
+    
+    // Add summary rows
+    csvContent += '\n';
+    csvContent += `I alt;;;;;;;;;${Math.round(calculateTotalCost())}\n`;
+    csvContent += `Basisvarer (15%);;;;;;;;;${Math.round(calculateBasisvarer())}\n`;
+    csvContent += `Til indkøber;;;;;;;;;${Math.round(calculateTilIndkøber())}\n`;
+    
+    // Section 2: Opskrifter
+    csvContent += '\n\nOPSKRIFTER\n';
+    csvContent += 'Dag;Opskrift;Portioner;Ingrediens;Mængde;Enhed\n';
+    
+    Object.entries(days).forEach(([dayName, dayData]) => {
+      const safeData = ensureRecipesArray(dayData);
+      const totalPeople = calculateTotalPeople(safeData.adults, safeData.kids, safeData.teens);
+      
+      safeData.recipes.forEach(recipe => {
+        recipe.ingredients.forEach((ingredient, idx) => {
+          const scaledIngredient = scaleIngredient(ingredient, totalPeople, recipe.servings);
+          csvContent += `${idx === 0 ? dayName : ''};${idx === 0 ? recipe.name : ''};${idx === 0 ? recipe.servings : ''};${scaledIngredient.name};${scaledIngredient.scaledAmount.replace(scaledIngredient.unit, '').trim()};${scaledIngredient.unit}\n`;
+        });
+        // Add empty row between recipes for clarity
+        if (recipe.ingredients.length > 0) {
+          csvContent += '\n';
+        }
+      });
+    });
+    
+    // Section 3: Indkøbsliste
+    csvContent += '\n\nINDKØBSLISTE\n';
+    csvContent += 'Kategori;Ingrediens;Enhed;Total Mængde\n';
 
     const allIngredients = getAllIngredients();
     const ingredientsByCategory = {};
+    const categories = ['🥩 Kød/Fisk', '🧀 Mejeri', '🥕 Grønt', '🥫 Kolonial', 'Ukategoriseret'];
     
     categories.forEach(category => {
       ingredientsByCategory[category] = new Map();
     });
 
-    // Collect all ingredients with their units
     allIngredients.forEach((ingredient) => {
       const normalizedName = normalizeIngredient(ingredient.name);
-      const category = categorizeIngredient(ingredient);
+      if (!normalizedName) return; // Skip invalid ingredients
       
+      const category = categorizeIngredient(ingredient);
       const key = `${normalizedName}_${ingredient.unit}`;
       
       if (!ingredientsByCategory[category].has(key)) {
         ingredientsByCategory[category].set(key, {
           name: ingredient.name,
           unit: ingredient.unit,
-          amounts: {},
           totalAmount: 0
         });
       }
       
       const scaledNum = parseDanishNumber(ingredient.scaledAmount.replace(ingredient.unit, ''));
-      
-      if (!ingredientsByCategory[category].get(key).amounts[ingredient.day]) {
-        ingredientsByCategory[category].get(key).amounts[ingredient.day] = ingredient.scaledAmount;
-      }
-      
-      // Only add to total if we have a valid number (not '?')
       if (scaledNum !== '?' && typeof scaledNum === 'number') {
         ingredientsByCategory[category].get(key).totalAmount += scaledNum;
       }
     });
 
-    // Generate CSV content
     categories.forEach(category => {
       const categoryIngredients = ingredientsByCategory[category];
-      
       if (categoryIngredients.size > 0) {
         categoryIngredients.forEach(ingredient => {
-          const row = [
-            category, 
-            ingredient.name,
-            ingredient.unit || ''
-          ];
-          
-          weekdays.forEach(day => {
-            const dayAmount = ingredient.amounts[day];
-            if (dayAmount) {
-              // Remove unit from the amount display - keep only numbers
-              const amountOnly = dayAmount.replace(ingredient.unit || '', '').trim();
-              row.push(amountOnly);
-            } else {
-              row.push('-');
-            }
-          });
-          
-          // Add total amount - handle unknown amounts properly, without unit
           const totalAmount = ingredient.totalAmount;
           let totalFormatted;
           if (totalAmount === 0 || isNaN(totalAmount)) {
@@ -688,9 +631,8 @@ const App = () => {
           } else {
             totalFormatted = formatDanishNumber(totalAmount);
           }
-          row.push(totalFormatted); // No unit here, unit is already in column 3
           
-          csvContent += row.join(';') + '\n';
+          csvContent += `${category};${ingredient.name};${ingredient.unit || ''};${totalFormatted}\n`;
         });
       }
     });
@@ -700,181 +642,338 @@ const App = () => {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `indkøbsliste_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `fælldeden_komplet_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-zinc-50 to-zinc-100 py-12">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <h1 className="text-4xl font-bold text-zinc-900 mb-2">🍝 Fælldedens opskriftberegner</h1>
-        <p className="text-zinc-600 mb-8">Beregn ingredienser baseret på antal personer</p>
-
-        <div className="bg-white rounded-2xl shadow-lg border border-zinc-100 p-8 mb-10">
-          <h2 className="text-2xl font-semibold text-zinc-900 mb-8">Daglige opskrifter</h2>
-
-          <div className="flex space-x-3 mb-8 overflow-x-auto pb-2 scrollbar-hide">
-            {Object.keys(days).map(day => (
-              <button
-                key={day}
-                onClick={() => setCurrentDay(day)}
-                className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 ${
-                  currentDay === day 
-                    ? 'bg-zinc-900 text-white shadow-md transform scale-105' 
-                    : 'bg-white text-zinc-700 hover:bg-zinc-50 border border-zinc-200 hover:border-zinc-300'
-                }`}
-              >
-                {day}
-              </button>
-            ))}
-          </div>
-
-          <div className="mb-8 bg-zinc-50 rounded-xl p-6">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-2 bg-white rounded-lg shadow-sm">
-                <Users className="text-zinc-700 w-5 h-5" />
-              </div>
-              <span className="text-base font-medium text-zinc-800">Antal personer for {currentDay}</span>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {['adults', 'kids'].map(type => (
-                <div key={type} className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-zinc-700">
-                    {type === 'adults' ? 'Voksne:' : 'Børn & Unge:'}
-                  </label>
+  // Tab content renderers
+  const renderOversigt = () => (
+    <div className="bg-white rounded-2xl shadow-lg border border-zinc-100 p-8">
+      <h2 className="text-2xl font-semibold text-zinc-900 mb-8">Ugentlig oversigt</h2>
+      
+      <div className="overflow-x-auto">
+        <table className="min-w-full border-collapse">
+          <thead>
+            <tr className="bg-zinc-50">
+              <th className="border border-zinc-200 px-4 py-3 text-left font-semibold text-zinc-900">Dag</th>
+              <th className="border border-zinc-200 px-4 py-3 text-left font-semibold text-zinc-900">V</th>
+              <th className="border border-zinc-200 px-4 py-3 text-left font-semibold text-zinc-900">B</th>
+              <th className="border border-zinc-200 px-4 py-3 text-left font-semibold text-zinc-900">O</th>
+              <th className="border border-zinc-200 px-4 py-3 text-left font-semibold text-zinc-900">Total</th>
+              <th className="border border-zinc-200 px-4 py-3 text-left font-semibold text-zinc-900">Borde</th>
+              <th className="border border-zinc-200 px-4 py-3 text-left font-semibold text-zinc-900">Beløb</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(days).map(([dayName, dayData]) => (
+              <tr key={dayName} className="hover:bg-zinc-50">
+                <td className="border border-zinc-200 px-4 py-3 font-medium text-zinc-900">{dayName}</td>
+                <td className="border border-zinc-200 px-4 py-3">
                   <input
                     type="number"
                     min="0"
-                    value={days[currentDay][type] || ''}
-                    onChange={(e) => updatePeople(currentDay, type, e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-600 focus:border-transparent transition-shadow"
-                    placeholder=""
+                    value={dayData.adults || ''}
+                    onChange={(e) => updatePeople(dayName, 'adults', e.target.value)}
+                    className="w-20 px-2 py-1 border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-600 text-center"
                   />
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 px-4 py-3 rounded-lg border border-zinc-200">
-              <span className="text-sm font-medium text-zinc-700">
-                Samlet antal: {calculateTotalPeople(days[currentDay].adults, days[currentDay].kids)} personer
-              </span>
-            </div>
-          </div>
+                </td>
+                <td className="border border-zinc-200 px-4 py-3">
+                  <input
+                    type="number"
+                    min="0"
+                    value={dayData.kids || ''}
+                    onChange={(e) => updatePeople(dayName, 'kids', e.target.value)}
+                    className="w-20 px-2 py-1 border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-600 text-center"
+                  />
+                </td>
+                <td className="border border-zinc-200 px-4 py-3">
+                  <input
+                    type="number"
+                    min="0"
+                    value={dayData.teens || ''}
+                    onChange={(e) => updatePeople(dayName, 'teens', e.target.value)}
+                    className="w-20 px-2 py-1 border border-zinc-200 rounded focus:outline-none focus:ring-2 focus:ring-zinc-600 text-center"
+                  />
+                </td>
+                <td className="border border-zinc-200 px-4 py-3 font-medium text-zinc-900">
+                  {formatDanishNumber(calculateTotalPeople(dayData.adults, dayData.kids, dayData.teens))}
+                </td>
+                <td className="border border-zinc-200 px-4 py-3 font-medium text-zinc-900">
+                  {calculateTables(dayData.adults, dayData.kids, dayData.teens)}
+                </td>
+                <td className="border border-zinc-200 px-4 py-3 font-medium text-zinc-900">
+                  {Math.round(calculateCost(dayName, dayData.adults, dayData.kids, dayData.teens))} kr
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="bg-zinc-100 font-bold">
+              <td className="border border-zinc-200 px-4 py-3" colSpan="6">I alt:</td>
+              <td className="border border-zinc-200 px-4 py-3 text-zinc-900">
+                {Math.round(calculateTotalCost())} kr
+              </td>
+            </tr>
+            <tr className="bg-zinc-100 font-bold">
+              <td className="border border-zinc-200 px-4 py-3" colSpan="6">Basisvarer (15%):</td>
+              <td className="border border-zinc-200 px-4 py-3 text-zinc-900">
+                {Math.round(calculateBasisvarer())} kr
+              </td>
+            </tr>
+            <tr className="bg-zinc-100 font-bold">
+              <td className="border border-zinc-200 px-4 py-3" colSpan="6">Til indkøber:</td>
+              <td className="border border-zinc-200 px-4 py-3 text-zinc-900">
+                {Math.round(calculateTilIndkøber())} kr
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+        <div className="mt-8 text-center">
+        <button
+          onClick={() => setActiveTab('Opskrifter')}
+          className="px-8 py-3 bg-zinc-900 text-white rounded-xl hover:bg-zinc-800 transition-all shadow-sm font-medium"
+        >
+          Næste: Opskrifter →
+        </button>
+      </div>
+    </div>
+      
+      <div className="mt-6 text-sm text-zinc-600">
+        <p><strong>V:</strong> Voksne | <strong>B:</strong> Børn | <strong>O:</strong> Små børn</p>
+        <p><strong>Total:</strong> V + (B÷2) + (O÷2) | <strong>Borde:</strong> (V+B+O)÷6 personer per bord</p>
+        <p><strong>Beløb:</strong> Man-Tor: V×44kr + B×22kr | Fre: V×60kr + B×30kr (O er ikke inkluderet)</p>
+      </div>
+    </div>
+  );
 
-          {/* Success/Error Message: Only show for the current day */}
-          {days[currentDay].successMessage && (
+  const renderOpskrifter = () => (
+    <div className="space-y-8">
+      {Object.entries(days).map(([dayName, dayData]) => (
+        <div key={dayName} className="bg-white rounded-2xl shadow-lg border border-zinc-100 p-8">
+          <h2 className="text-2xl font-semibold text-zinc-900 mb-4">
+            {dayName} - {formatDanishNumber(calculateTotalPeople(dayData.adults, dayData.kids, dayData.teens))} personer
+          </h2>
+          
+          {/* Success/Error Message */}
+          {dayData.successMessage && (
             <div className={`p-4 rounded-lg mb-6 ${
-              days[currentDay].successMessage.includes('❌') 
+              dayData.successMessage.includes('❌') 
                 ? 'bg-red-100 text-red-800' 
                 : 'bg-green-100 text-green-800'
             }`}>
-              {days[currentDay].successMessage}
+              {dayData.successMessage}
             </div>
           )}
 
-          <div className="grid md:grid-cols-1 gap-8">
-            <div className="space-y-4">
-              <h3 className="text-xl font-semibold text-zinc-900">Tilføj Opskrift URL</h3>
-              <form onSubmit={handleUrlSubmit} className="flex gap-3">
-                <div className="relative flex-grow">
-                  <input
-                    type="url"
-                    value={recipeUrl}
-                    onChange={(e) => setRecipeUrl(e.target.value)}
-                    placeholder="Indsæt opskrift URL her"
-                    className="w-full px-4 py-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-600 focus:border-transparent transition-all"
-                    disabled={loading}
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={loading || !isSubmitValid()}
-                  className="flex items-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-xl hover:bg-zinc-800 disabled:bg-zinc-400 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md"
-                >
-                  <Link className="w-5 h-5" />
-                  {loading ? 'Behandler...' : 'Beregn'}
-                </button>
-              </form>
-              {!isSubmitValid() && (
-                <p className="text-sm text-zinc-500">
-                  Indtast antal voksne og en URL for at tilføje opskrift
-                </p>
-              )}
+          {/* Add Recipe Form */}
+          <form onSubmit={(e) => handleUrlSubmit(dayName, e)} className="mb-6">
+            <div className="flex gap-3">
+              <input
+                type="url"
+                value={recipeUrls[dayName] || ''}
+                onChange={(e) => setRecipeUrls(prev => ({ ...prev, [dayName]: e.target.value }))}
+                placeholder="Indsæt opskrift URL her"
+                className="flex-1 px-4 py-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-600 focus:border-transparent transition-all"
+                disabled={loading}
+              />
+              <button
+                type="submit"
+                disabled={loading || !recipeUrls[dayName]?.trim()}
+                className="flex items-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-xl hover:bg-zinc-800 disabled:bg-zinc-400 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md"
+              >
+                <Link className="w-5 h-5" />
+                {loading ? 'Behandler...' : 'Tilføj'}
+              </button>
             </div>
-          </div>
+          </form>
 
-          {/* Recipe Management Section */}
-          <div className="mt-8">
-            <h3 className="text-xl font-semibold text-zinc-900 mb-4">Opskrifter for {currentDay}</h3>
-            
-            {(days[currentDay].recipes || []).length === 0 ? (
-              <div className="text-center py-8 text-zinc-500">
-                <p>Ingen opskrifter tilføjet endnu</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {(days[currentDay].recipes || []).map((recipe, index) => (
-                  <div key={recipe.id} className="bg-zinc-50 rounded-lg p-4 border border-zinc-200">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3 flex-1">
+          {/* Recipe List */}
+          {(dayData.recipes || []).length === 0 ? (
+            <div className="text-center py-8 text-zinc-500">
+              <p>Ingen opskrifter tilføjet til {dayName} endnu</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {(dayData.recipes || []).map((recipe) => (
+                <div key={recipe.id} className="bg-zinc-50 rounded-lg p-4 border border-zinc-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3 flex-1">
+                      <input
+                        type="text"
+                        value={recipe.name}
+                        onChange={(e) => updateRecipeName(dayName, recipe.id, e.target.value)}
+                        className="flex-1 px-3 py-2 bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-600 text-sm"
+                        placeholder="Opskriftnavn"
+                      />
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-zinc-600">Portioner:</label>
                         <input
-                          type="text"
-                          value={recipe.name}
-                          onChange={(e) => updateRecipeName(currentDay, recipe.id, e.target.value)}
-                          className="flex-1 px-3 py-2 bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-600 text-sm"
-                          placeholder="Opskriftnavn"
+                          type="number"
+                          min="1"
+                          value={recipe.servings}
+                          onChange={(e) => updateRecipeServings(dayName, recipe.id, e.target.value)}
+                          className="w-20 px-3 py-2 bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-600 text-sm"
                         />
-                        <div className="flex items-center gap-2">
-                          <label className="text-sm text-zinc-600">Portioner:</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={recipe.servings}
-                            onChange={(e) => updateRecipeServings(currentDay, recipe.id, e.target.value)}
-                            className="w-20 px-3 py-2 bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-600 text-sm"
-                          />
-                        </div>
-                        <button
-                          onClick={() => deleteRecipe(currentDay, recipe.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Slet opskrift"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
+                      <button
+                        onClick={() => deleteRecipe(dayName, recipe.id)}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Slet opskrift"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
-                    
-                    <div className="text-sm text-zinc-600">
-                      <span className="font-medium">{recipe.ingredients.length}</span> ingredienser
+                  </div>
+                  
+                  {/* Ingredients for this recipe */}
+                  <div className="mt-4">
+                    <h4 className="text-sm font-medium text-zinc-700 mb-2">Ingredienser:</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 text-sm">
+                      {recipe.ingredients.map((ingredient, idx) => {
+                        const totalPeople = calculateTotalPeople(dayData.adults, dayData.kids, dayData.teens);
+                        const scaledIngredient = scaleIngredient(ingredient, totalPeople, recipe.servings);
+                        return (
+                          <div key={idx} className="text-zinc-600">
+                            <span className="font-medium">{scaledIngredient.scaledAmount.replace(scaledIngredient.unit, '').trim()}</span>
+                            <span className="text-zinc-500 ml-1">{scaledIngredient.unit}</span>
+                            <span className="ml-2">{scaledIngredient.name}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+      
+      <div className="mt-8 text-center">
+        <button
+          onClick={() => setActiveTab('Indkøbsliste')}
+          className="px-8 py-3 bg-zinc-900 text-white rounded-xl hover:bg-zinc-800 transition-all shadow-sm font-medium"
+        >
+          Næste: Indkøbsliste →
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderIndkøbsliste = () => {
+    const allIngredients = getAllIngredients();
+    
+    // Group ingredients by category and consolidate
+    const ingredientsByCategory = {};
+    const categories = ['🥩 Kød/Fisk', '🧀 Mejeri', '🥕 Grønt', '🥫 Kolonial', 'Ukategoriseret'];
+    
+    categories.forEach(category => {
+      ingredientsByCategory[category] = new Map();
+    });
+
+    allIngredients.forEach((ingredient) => {
+      const normalizedName = normalizeIngredient(ingredient.name);
+      const category = categorizeIngredient(ingredient);
+      const key = `${normalizedName}_${ingredient.unit}`;
+      
+      if (!ingredientsByCategory[category].has(key)) {
+        ingredientsByCategory[category].set(key, {
+          name: ingredient.name,
+          unit: ingredient.unit,
+          totalAmount: 0,
+          scaledAmounts: []
+        });
+      }
+      
+      const item = ingredientsByCategory[category].get(key);
+      const scaledNum = parseDanishNumber(ingredient.scaledAmount.replace(ingredient.unit, ''));
+      
+      if (scaledNum !== '?' && typeof scaledNum === 'number') {
+        item.totalAmount += scaledNum;
+      }
+      item.scaledAmounts.push(ingredient.scaledAmount);
+    });
+
+    return (
+      <div className="bg-white rounded-2xl shadow-lg border border-zinc-100 p-8">
+        <h2 className="text-2xl font-semibold text-zinc-900 mb-8">Samlet Indkøbsliste</h2>
+
+        {categories.map(category => {
+          const categoryIngredients = Array.from(ingredientsByCategory[category].values());
+          if (categoryIngredients.length === 0) return null;
+
+          return (
+            <div key={category} className="mb-10">
+              <h3 className={`text-xl font-semibold mb-6 ${category === 'Ukategoriseret' ? 'text-amber-600' : 'text-zinc-900'}`}>
+                {category}
+              </h3>
+              <div className="space-y-3">
+                {categoryIngredients.map((ingredient, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-4 bg-zinc-50 rounded-lg border border-zinc-200">
+                    <div className="flex-1">
+                      <span className="font-medium text-zinc-900">{ingredient.name}</span>
+                      {ingredient.unit && (
+                        <span className="text-zinc-500 ml-2">({ingredient.unit})</span>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <div className="font-semibold text-zinc-900">
+                        {ingredient.totalAmount > 0 
+                          ? `${formatDanishNumber(ingredient.totalAmount)} ${ingredient.unit}` 
+                          : `? ${ingredient.unit}`
+                        }
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
-            )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-zinc-50 to-zinc-100 py-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between items-start mb-8">
+          <div>
+            <h1 className="text-4xl font-bold text-zinc-900 mb-2">🍝 Fælldedens opskriftberegner</h1>
+            <p className="text-zinc-600">Beregn ingredienser baseret på antal personer</p>
           </div>
+          <button
+            onClick={exportToExcel}
+            className="px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all shadow-sm font-medium"
+          >
+            📊 Eksporter Alt
+          </button>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-lg border border-zinc-100 p-8">
-          <h2 className="text-2xl font-semibold text-zinc-900 mb-8">Samlet Indkøbsliste</h2>
-
-          {/* Export Button */}
-          <button
-            onClick={exportToCSV}
-            className="mb-6 px-6 py-3 bg-zinc-900 text-white rounded-xl hover:bg-zinc-800 transition-all shadow-sm"
-          >
-            Eksporter
-          </button>
-
-          {['🥩 Kød/Fisk', '🧀 Mejeri', '🥕 Grønt', '🥫 Kolonial', 'Ukategoriseret'].map(category => (
-            <IngredientTable 
-              key={category} 
-              category={category}
-            />
+        {/* Tab Navigation */}
+        <div className="flex space-x-3 mb-10 overflow-x-auto pb-2 scrollbar-hide">
+          {['Oversigt', 'Opskrifter', 'Indkøbsliste'].map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 whitespace-nowrap ${
+                activeTab === tab 
+                  ? 'bg-zinc-900 text-white shadow-md transform scale-105' 
+                  : 'bg-white text-zinc-700 hover:bg-zinc-50 border border-zinc-200 hover:border-zinc-300'
+              }`}
+            >
+              {tab}
+            </button>
           ))}
         </div>
+
+        {/* Tab Content */}
+        {activeTab === 'Oversigt' && renderOversigt()}
+        {activeTab === 'Opskrifter' && renderOpskrifter()}
+        {activeTab === 'Indkøbsliste' && renderIndkøbsliste()}
       </div>
     </div>
   );
