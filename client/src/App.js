@@ -563,13 +563,13 @@ const App = () => {
     
     // Add summary rows
     csvContent += '\n';
-    csvContent += `I alt;;;;;;;;;${Math.round(calculateTotalCost())}\n`;
-    csvContent += `Basisvarer (15%);;;;;;;;;${Math.round(calculateBasisvarer())}\n`;
-    csvContent += `Til indkøber;;;;;;;;;${Math.round(calculateTilIndkøber())}\n`;
+    csvContent += `I alt;;;;;;${Math.round(calculateTotalCost())}\n`;
+    csvContent += `Basisvarer (15%);;;;;;${Math.round(calculateBasisvarer())}\n`;
+    csvContent += `Til indkøber;;;;;;${Math.round(calculateTilIndkøber())}\n`;
     
     // Section 2: Opskrifter
     csvContent += '\n\nOPSKRIFTER\n';
-    csvContent += 'Dag;Opskrift;Portioner;Ingrediens;Mængde;Enhed\n';
+    csvContent += 'Dag;Opskrift;Oprindeligt lavet til;Ingrediens;Mængde;Enhed\n';
     
     Object.entries(days).forEach(([dayName, dayData]) => {
       const safeData = ensureRecipesArray(dayData);
@@ -642,7 +642,7 @@ const App = () => {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `fælldeden_komplet_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `fælleden_komplet_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -809,7 +809,7 @@ const App = () => {
                         placeholder="Opskriftnavn"
                       />
                       <div className="flex items-center gap-2">
-                        <label className="text-sm text-zinc-600">Portioner:</label>
+                        <label className="text-sm text-zinc-600">Oprindeligt lavet til:</label>
                         <input
                           type="number"
                           min="1"
@@ -942,7 +942,7 @@ const App = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-start mb-8">
           <div>
-            <h1 className="text-4xl font-bold text-zinc-900 mb-2">🍝 Fælldedens opskriftberegner</h1>
+            <h1 className="text-4xl font-bold text-zinc-900 mb-2">🍝 Fælledens opskriftberegner</h1>
             <p className="text-zinc-600">Beregn ingredienser baseret på antal personer</p>
           </div>
           <button
